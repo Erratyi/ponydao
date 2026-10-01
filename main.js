@@ -1,7 +1,18 @@
 import { authenticateDemoUser, endDemoSession, isDemoSignedIn, islandById, islands, owner, startDemoSession } from './data.js?v=3';
+import {createSeedState,projectDao} from './collaboration.js';
+import {createStore} from './collaboration-store.js';
+import {escapeHtml as h,renderDao,renderPublicCard,renderPreview} from './collaboration-ui.js';
+import {mountCollaboration} from './collaboration-controller.js';
 
 const app = document.querySelector('#app');
 let pendingHomeScroll = false;
+let preview={mode:'owner'},disposeCollaboration=null;
+let localStorageHandle;
+try {localStorageHandle=window.localStorage;} catch {localStorageHandle={getItem(){throw Error('storage unavailable');}};}
+const collaborationStore=createStore(localStorageHandle,createSeedState(islands));
+const getActor=()=>isDemoSignedIn(sessionStorage)?(currentRoute().startsWith('/dao/')?preview:{mode:'owner'}):{mode:'guest'};
+const myDaos=()=>collaborationStore.read().daos;
+const daoCounts=dao=>projectDao(collaborationStore.read(),dao.id,{mode:'owner'}).counts;
 
 function brand() {
   return `<a class="brand" href="#/" aria-label="PONY共创，返回首页"><img src="./assets/ponydao.png?v=2" alt="" /><span>PONY<span class="brand-cn">共创</span></span></a>`;
@@ -73,45 +84,43 @@ function homePage() {
 }
 
 function islandCover(island, className = '') {
-  return `<div class="island-cover island-cover-${island.theme} ${className}"><img src="${island.logo}" alt="${island.name} Logo" /></div>`;
+  return `<div class="island-cover island-cover-${island.theme} ${className}">${island.logo?`<img src="${h(island.logo)}" alt="${h(island.name)} Logo" />`:`<span class="co-logo-fallback">${h(island.name.slice(0,1))}</span>`}</div>`;
 }
 
 function islandCard(island) {
-  return `<article class="island-card" data-island-search="${[island.name, island.product, ...island.projects].join(' ').toLowerCase()}">
-    ${islandCover(island)}
-    <div class="island-card-body"><div class="card-eyebrow"><span>共创岛</span><span>${String(island.projects.length).padStart(2, '0')} 个项目</span></div>
-      <h2>${island.name}</h2><p>产品：${island.product}</p>
-      <div class="card-meta"><span>岛主 · ${owner.name}</span><a href="#/dao/${island.id}" aria-label="查看${island.name}详情">查看详情 <span aria-hidden="true">↗</span></a></div>
-    </div></article>`;
+  return renderPublicCard(projectDao(collaborationStore.read(),island.id,{mode:'guest'}));
 }
 
 function explorePage() {
   return `${publicHeader('dao')}<main class="explore-page"><div class="container">
     <div class="explore-heading"><span class="section-kicker">DISCOVER / 共创岛</span><h1>发现共创岛</h1><p>从真实的产品与项目出发，找到值得一起推进的方向。</p></div>
-    <div class="explore-search"><label for="island-search" class="sr-only">搜索共创岛、产品或项目</label><span aria-hidden="true">⌕</span><input id="island-search" type="search" placeholder="搜索共创岛、产品或项目" autocomplete="off" /><button type="button" data-search-trigger>搜索</button></div>
+    <div class="explore-search"><label for="island-search" class="sr-only">搜索共创岛</label><span aria-hidden="true">⌕</span><input id="island-search" type="search" placeholder="搜索共创岛" autocomplete="off" /><button type="button" data-search-trigger>搜索</button></div>
     <div class="explore-results-heading"><span>共创岛 <strong id="result-count">03</strong></span><span>按岛屿浏览</span></div>
     <div class="island-grid" id="island-results">${islands.map(islandCard).join('')}</div>
     <p class="search-empty" id="search-empty" hidden>没有找到相关共创岛，请尝试其他关键词。</p>
   </div></main>${siteFooter()}`;
 }
 
-function detailPage(island) {
-  if (!island) return notFoundPage();
-  return `${publicHeader('dao')}<main class="detail-page">
-    <div class="container"><div class="breadcrumb"><a href="#/dao">发现共创岛</a><span>/</span><span>${island.name}</span></div>
-      <section class="detail-hero"><div class="detail-hero-copy"><span class="section-kicker">DAO</span><h1>${island.name}</h1><p>以产品和项目为载体，汇聚伙伴，共同推进。</p><div class="detail-owner"><span class="avatar avatar-small">聂</span><span>岛主 · ${owner.name}</span></div><div class="detail-hero-actions"><button type="button" class="button button-primary">申请加入共创岛 <span aria-hidden="true">↗</span></button><a class="button button-outline" href="#/dao">返回发现页</a></div></div>${islandCover(island, 'detail-logo-panel')}</section>
-      <nav class="detail-tabs" aria-label="共创岛详情分区"><button type="button" data-detail-target="overview" class="selected">概览</button><button type="button" data-detail-target="products">产品</button><button type="button" data-detail-target="projects">项目</button><span>伙伴</span><span>共创规则</span></nav>
-      <div class="detail-grid"><div class="detail-main">
-        <section class="detail-section" id="overview"><div class="block-heading"><span>01 / OVERVIEW</span><h2>共创岛概览</h2></div><p class="overview-copy">${island.name}围绕 <strong>${island.product}</strong> 展开产品共创，并推进 ${island.projects.map((project) => `<strong>${project}</strong>`).join('、')}。</p><div class="overview-facts"><div><small>产品</small><strong>1 个</strong></div><div><small>项目</small><strong>${island.projects.length} 个</strong></div><div><small>岛主</small><strong>${owner.name}</strong></div></div></section>
-        <section class="detail-section" id="products"><div class="block-heading"><span>02 / PRODUCTS</span><h2>产品</h2><p>以研发协作为主，由研发 OPC 参与。</p></div><div class="entity-row"><div class="entity-number">01</div><div><span class="entity-type">产品</span><h3>${island.product}</h3></div><span class="entity-arrow">↗</span></div></section>
-        <section class="detail-section" id="projects"><div class="block-heading"><span>03 / PROJECTS</span><h2>项目</h2><p>以落地交付为主，由交付 OPC 参与。</p></div>${island.projects.map((project, index) => `<div class="entity-row"><div class="entity-number">${String(index + 1).padStart(2, '0')}</div><div><span class="entity-type">项目</span><h3>${project}</h3></div><span class="entity-arrow">↗</span></div>`).join('')}</section>
-      </div><aside class="detail-aside"><div class="aside-panel"><span class="section-kicker">DAO OWNER</span><div class="owner-inline"><span class="avatar">聂</span><div><strong>${owner.name}</strong><small>共创岛岛主</small></div></div><p>产品与项目在同一座共创岛内协同推进。</p></div><div class="aside-panel aside-structure"><span class="section-kicker">组织结构</span><div><strong>岛主</strong><span>${owner.name}</span></div><div><strong>研发负责人</strong><span>—</span></div><div><strong>研发 OPC</strong><span>—</span></div><div><strong>交付负责人</strong><span>—</span></div><div><strong>交付 OPC</strong><span>—</span></div></div></aside></div>
-    </div></main>${siteFooter()}`;
+function detailPage(daoId) {
+  const state=collaborationStore.read(), actor=getActor(), view=projectDao(state,daoId,actor);
+  if(!view){
+    const ownedDraft=isDemoSignedIn(sessionStorage)&&state.daos.some(d=>d.id===daoId&&d.visibility==='draft'&&d.ownerId===owner.username);
+    if(ownedDraft)return publicHeader('dao')+'<main class="detail-page"><div class="container">'+renderPreview({entities:[]},preview)+'<section class="co-empty"><h1>当前演示视角无法访问本地草稿</h1><p>请切回岛主或成员视角继续查看。</p><a class="button button-outline" href="#/hub/dao">返回我的共创</a></section></div></main>'+siteFooter();
+    return notFoundPage();
+  }
+  const d=view.dao, parts=currentRoute().split('/');
+  const route=parts[3]==='entity'?{entityId:parts[4]}:{module:parts[3]||'overview'};
+  const previewBar=isDemoSignedIn(sessionStorage)?renderPreview(projectDao(state,daoId,{mode:'owner'}),preview):'';
+  const createMenu=actor.mode==='owner'?'<details class="co-new-menu"><summary class="button button-primary">新建 ▾</summary><div><button type="button" class="button button-outline" data-co="new-product">产品</button><button type="button" class="button button-outline" data-co="new-project">项目</button></div></details>':'';
+  return publicHeader('dao')+'<main class="detail-page"><div class="container"><div class="breadcrumb"><a href="#/dao">发现共创岛</a><span>/</span><span>'+h(d.name)+'</span></div>'+previewBar+'<section class="detail-hero"><div class="detail-hero-copy"><span class="section-kicker">DAO'+(d.visibility==='draft'?' / 本地草稿':'')+'</span><h1>'+h(d.name)+'</h1><p>'+h(d.summary)+'</p><div class="detail-owner"><span class="avatar avatar-small">聂</span><span>岛主 · '+owner.name+'</span></div><div class="detail-hero-actions">'+createMenu+(actor.mode==='guest'?'<a class="button button-primary" href="#/login">登录查看</a>':actor.mode==='nonmember'?'<button class="button button-primary" type="button">申请加入共创岛</button>':'')+'<a class="button button-outline" href="#/dao">返回发现页</a></div></div>'+islandCover(d,'detail-logo-panel')+'</section>'+renderDao(view,route)+'</div></main>'+siteFooter();
 }
 
 function authPage(mode) {
   const login = mode === 'login';
-  return `<main class="auth-page"><div class="auth-frame"><div class="auth-brand-panel"><div class="auth-brand">${brand()}</div><div class="auth-brand-center"><span class="section-kicker">PONYDAO</span><h1>${login ? '继续推进，<br />你的共创。' : '从这里开始，<br />一起共创。'}</h1><p>聚人成岛，共事成真。</p></div></div>
+  const titleLines = login ? ['继续推进，', '你的共创。'] : ['从这里开始，', '一起共创。'];
+  let charIndex = 0;
+  const animatedTitle = titleLines.map((line) => `<span class="auth-title-line" aria-hidden="true">${Array.from(line, (char) => `<span class="auth-title-char" style="--char-index:${charIndex++}">${char}</span>`).join('')}</span>`).join('');
+  return `<main class="auth-page"><div class="auth-frame"><div class="auth-brand-panel"><div class="auth-brand">${brand()}</div><div class="auth-brand-center"><h1 aria-label="${titleLines.join('')}">${animatedTitle}</h1></div></div>
     <div class="auth-form-panel"><div class="auth-form-wrap"><span class="section-kicker">${login ? 'WELCOME BACK' : 'JOIN PONY'}</span><h2>${login ? '登录' : '注册账号'}</h2><p>${login ? '使用你的账号继续访问个人中心。' : '填写基础信息，建立你的 OPC 账号。'}</p>
     <form id="${login ? 'login-form' : 'register-form'}" novalidate>
       ${login ? `<label for="identity">用户名或邮箱</label><input id="identity" name="identity" autocomplete="username" placeholder="用户名或邮箱" />
@@ -146,19 +155,19 @@ function appShell(active, content) {
 }
 
 function miniIsland(island) {
-  return `<a class="mini-island" href="#/dao/${island.id}">${islandCover(island, 'mini-island-cover')}<div><small>岛主 · ${owner.name}</small><strong>${island.name}</strong><span>${island.product}</span></div><span class="mini-arrow" aria-hidden="true">↗</span></a>`;
+  return `<a class="mini-island" href="#/dao/${island.id}">${islandCover(island, 'mini-island-cover')}<div><small>${island.visibility==='draft'?'本地草稿':'岛主 · '+owner.name}</small><strong>${h(island.name)}</strong><span>${h(island.summary)}</span></div><span class="mini-arrow" aria-hidden="true">↗</span></a>`;
 }
 
 function hubPage() {
   return appShell('hub', `<div class="workspace-heading"><span class="section-kicker">PERSONAL HUB / 个人中心</span><h1>你好，${owner.name}。</h1><p>这里汇总你参与的共创岛与相关内容。</p></div>
-    <div class="stat-row"><div><span>我的共创</span><strong>03 <small>座</small></strong></div><div><span>产品</span><strong>03 <small>项</small></strong></div><div><span>项目</span><strong>05 <small>项</small></strong></div></div>
-    <section class="dashboard-panel"><div class="panel-heading"><div><span class="section-kicker">MY DAOs</span><h2>我的共创</h2></div><a href="#/hub/dao">查看全部 <span aria-hidden="true">↗</span></a></div><div class="mini-island-list">${islands.map(miniIsland).join('')}</div></section>
+    <div class="stat-row"><div><span>我的共创</span><strong>${myDaos().length} <small>座</small></strong></div><div><span>产品</span><strong>${collaborationStore.read().entities.filter(e=>e.kind==='product').length} <small>项</small></strong></div><div><span>项目</span><strong>${collaborationStore.read().entities.filter(e=>e.kind==='project').length} <small>项</small></strong></div></div>
+    <section class="dashboard-panel"><div class="panel-heading"><div><span class="section-kicker">MY DAOs</span><h2>我的共创</h2></div><a href="#/hub/dao">查看全部 <span aria-hidden="true">↗</span></a></div><div class="mini-island-list">${myDaos().map(miniIsland).join('')}</div></section>
     <div class="dashboard-bottom"><section class="dashboard-panel quiet-panel"><div class="panel-heading"><div><span class="section-kicker">CONTRIBUTION</span><h2>贡献记录</h2></div></div><div class="framework-lines"><span></span><span></span><span></span></div></section><section class="dashboard-panel quiet-panel"><div class="panel-heading"><div><span class="section-kicker">EQUITY</span><h2>收益与分账</h2></div></div><div class="framework-lines"><span></span><span></span><span></span></div></section></div>`);
 }
 
 function managePage() {
-  return appShell('mine', `<div class="workspace-heading manage-heading"><div><span class="section-kicker">MY DAOs</span><h1>我的共创</h1><p>你创建和参与的共创岛，都在这里。</p></div><div class="heading-actions"><button type="button" class="button button-outline">创建共创岛</button><a class="button button-primary" href="#/dao">加入共创岛</a></div></div>
-    <section class="manage-list"><div class="manage-list-head"><span>共创岛</span><span>内容</span><span>操作</span></div>${islands.map((island) => `<article class="manage-row"><div class="manage-island">${islandCover(island, 'manage-logo')}<div><span class="owner-tag">岛主</span><h2>${island.name}</h2><p>${island.product}</p></div></div><div class="manage-counts"><span>产品 <strong>01</strong></span><span>项目 <strong>${String(island.projects.length).padStart(2, '0')}</strong></span></div><a class="row-view" href="#/dao/${island.id}">查看 <span aria-hidden="true">↗</span></a></article>`).join('')}</section>`);
+  return appShell('mine', `<div class="workspace-heading manage-heading"><div><span class="section-kicker">MY DAOs</span><h1>我的共创</h1><p>你创建和参与的共创岛，都在这里。</p></div><div class="heading-actions"><button type="button" data-co="create-dao" class="button button-outline">创建共创岛</button><a class="button button-primary" href="#/dao">加入共创岛</a></div></div>
+    <section class="manage-list"><div class="manage-list-head"><span>共创岛</span><span>内容</span><span>操作</span></div>${myDaos().map(island=>`<article class="manage-row"><div class="manage-island">${islandCover(island,'manage-logo')}<div><span class="owner-tag">${island.visibility==='draft'?'本地草稿':'岛主'}</span><h2>${h(island.name)}</h2><p>${h(island.summary)}</p></div></div><div class="manage-counts"><span>产品 <strong>${daoCounts(island).products}</strong></span><span>项目 <strong>${daoCounts(island).projects}</strong></span></div><a class="row-view" href="#/dao/${island.id}">查看 ↗</a></article>`).join('')}</section>`);
 }
 
 function accountPage() {
@@ -177,10 +186,12 @@ function currentRoute() {
 }
 
 function render() {
+  disposeCollaboration?.();
   const route = currentRoute();
+  if(['/hub','/hub/dao','/account'].includes(route)&&!isDemoSignedIn(sessionStorage)){location.hash='#/login';return;}
   if (route === '/') app.innerHTML = homePage();
   else if (route === '/dao') app.innerHTML = explorePage();
-  else if (route.startsWith('/dao/')) app.innerHTML = detailPage(islandById[route.split('/')[2]]);
+  else if (route.startsWith('/dao/')) app.innerHTML = detailPage(route.split('/')[2]);
   else if (route === '/login') app.innerHTML = authPage('login');
   else if (route === '/register') app.innerHTML = authPage('register');
   else if (route === '/hub') app.innerHTML = hubPage();
@@ -188,6 +199,8 @@ function render() {
   else if (route === '/account') app.innerHTML = accountPage();
   else app.innerHTML = notFoundPage();
   document.title = `${pageTitle(route)} | PONY共创`;
+  if(collaborationStore.getNotice()) app.insertAdjacentHTML('beforeend',`<p class="co-storage-notice" role="alert">${h(collaborationStore.getNotice())}</p>`);
+  disposeCollaboration=mountCollaboration({root:app,store:collaborationStore,getActor,setPreview:value=>{preview=value;},onNavigate:hash=>location.hash=hash,onRender:render});
   window.scrollTo({ top: 0, behavior: 'instant' });
   updateHomeHeader();
   if (route === '/' && pendingHomeScroll) {
@@ -204,7 +217,7 @@ function updateHomeHeader() {
 }
 
 function pageTitle(route) {
-  if (route.startsWith('/dao/')) return islandById[route.split('/')[2]]?.name || '页面未找到';
+  if (route.startsWith('/dao/')) return projectDao(collaborationStore.read(),route.split('/')[2],getActor())?.dao.name || '页面未找到';
   const titles = {'/': '首页', '/dao': '发现共创岛', '/login': '登录', '/register': '注册', '/hub': '个人中心', '/hub/dao': '我的共创', '/account': '个人信息'};
   return titles[route] || '页面未找到';
 }
@@ -214,6 +227,7 @@ document.addEventListener('click', (event) => {
   if (logoutLink) {
     event.preventDefault();
     endDemoSession(sessionStorage);
+    preview={mode:'owner'};
     if (currentRoute() === '/') render();
     else location.hash = '#/';
     return;
